@@ -7,7 +7,8 @@ from scipy.ndimage import gaussian_filter
    
 ### library from smith 2019
 import skimage.measure as skmeas
-from skimage.morphology import watershed, medial_axis, skeletonize
+from skimage.morphology import  medial_axis, skeletonize
+from skimage.segmentation import watershed
 from skimage.filters import sobel
 import skimage.filters as skfilt
 from skimage.measure import regionprops
@@ -62,12 +63,20 @@ def remove_background(profiles, radius=20, light_background=True):
     ballheight = np.ma.masked_where(ballheight < 0, ballheight)
     ballheight = np.sqrt(ballheight)
     newprofiles = {}
-    for k, im1 in profiles.items():
-        imin= im1.min()
-        im2 = im1 - imin
-        bg1 = ndi.grey_opening(im2, structure=ballheight, mode="reflect")
-        im2 -= bg1
-        newprofiles[k] = im2 - im2.min()
+    if light_background:
+        for k, im1 in profiles.items():
+            imax = im1.max()
+            im2 = imax - im1
+            bg1 = ndi.grey_opening(im2, structure=ballheight, mode="reflect")
+            im2 -= bg1
+            newprofiles[k] = (im2 - imax)
+    else:    
+        for k, im1 in profiles.items():
+            imin= im1.min()
+            im2 = im1 - imin
+            bg1 = ndi.grey_opening(im2, structure=ballheight, mode="reflect")
+            im2 -= bg1
+            newprofiles[k] = im2 - im2.min()
     return newprofiles
         
 #         im1=-im1;

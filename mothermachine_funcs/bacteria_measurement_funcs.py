@@ -11,7 +11,8 @@ from scipy.ndimage import gaussian_filter
    
 ### library from smith 2019
 import skimage.measure as skmeas
-from skimage.morphology import watershed, medial_axis, skeletonize
+from skimage.morphology import medial_axis, skeletonize
+from skimage.segmentation import watershed
 from skimage.filters import sobel
 import skimage.filters as skfilt
 from skimage.measure import regionprops
@@ -54,7 +55,7 @@ class BacteriaData():
         self.bacteria = {}
 
     def add_bac_data(
-            self, bac_num, bacteria_lineage, region, tpoint, well_label=None):
+            self, bac_num, bacteria_lineage, region, tpoint, well_label=None,fluo=None):
         """
         Creates a new instance of the IndividualBacteria class for a new
         bacteria, or updates it if it already exists
@@ -79,6 +80,8 @@ class BacteriaData():
             self.bacteria[bac_num].add_string(bacteria_lineage[bac_num])
         self.bacteria[bac_num].well_label = well_label
         self.bacteria[region.label].add_bf_values(region, tpoint)
+        if fluo is not None:
+            self.bacteria[region.label].fluorescence["Fluo"].append(fluo)
 
     def measure_fluo(self, region, fluorescence_data, bkg_values, timepoint):
         """
@@ -164,6 +167,7 @@ class IndividualBacteria():
             "Width": [],
             "Length": [],
         }
+        self.fluorescence = {'Fluo':[]}
         self.raw_fluorescence = {}
         self.actual_fluorescence = {}
         self.integrated_fluorescence = {}
@@ -200,6 +204,9 @@ class IndividualBacteria():
         self.bf_measurements["Length"].append(region.major_axis_length)
         self.timepoints.append(tpoint)
 
+
+    
+    '''this is the original one that i don't understand
     def add_fluo_values(self, region, fluorescence_data,
                         bkg_values, timepoint):
         """
@@ -228,7 +235,7 @@ class IndividualBacteria():
             self.raw_fluorescence[(timepoint, num)] = fluo
             self.actual_fluorescence[(timepoint, num)] = fluo_bg
             self.integrated_fluorescence[(timepoint, num)] = int_fluo
-
+    '''
     def compile_data(self, max_tpoint):
         """
         Compiles all of the data into a readable output

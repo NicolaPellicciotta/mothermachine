@@ -42,9 +42,7 @@ def bacteria_tracking(last_wells, current_wells, bacteria_lineage,
                     prob_death=0.01,
                     prob_no_change=0.7,
                     av_bac_length=40,#18,
-                    important_bac=None,
-                    max_important_bac=5,
-                    out_label=2000
+                    important_bac=None
                     ):
     """
     Takes a dictionary of wells from the previous frame and a second
@@ -77,10 +75,8 @@ def bacteria_tracking(last_wells, current_wells, bacteria_lineage,
     out_wells = {}
     check_probs ={}
     best_options={}
-#    out_label=uint8(254)
     if important_bac==None:
         important_bac= 8
-    
         
     # create an in_list of the bacteria in the last well (ordered by position along the channel)
     for num, well in last_wells.items():
@@ -90,18 +86,7 @@ def bacteria_tracking(last_wells, current_wells, bacteria_lineage,
         end_channel= shape(new_well)[0]
         in_list = []
         centroid_pos =[]
-
-        # for each option it gives the change in centroid position, area for each bacteria 
-        
-        measurements_in = {}  # need to sort them in the same order as list
-        measurements_out = {}
-
-        # below shift account for the bacteria growth in the channel that moves bacteria
-        shift_centroid = 0# 10./400 # (50 pixels shift for the end channel )
-
-        # nicola major change 8.5.2020
-        # we sort always the previous data in centroid order       
-        
+        #option_list = []
         for region in regionprops(well):
             # list the bacteria labels from the current frame
             in_list.append(region.label)
@@ -112,56 +97,40 @@ def bacteria_tracking(last_wells, current_wells, bacteria_lineage,
         in_list= in_list[ind_sort_y]
         in_list = ndarray.tolist(in_list)
         
-        ind_cc =0
-        for jj in ind_sort_y:
-            for i, region in enumerate(regionprops(well)):
-                if i==jj:
-
-                    measurements_in[ind_cc] = [region.centroid[0]+shift_centroid*region.centroid[0], # change in cenntroid
-                                               region.major_axis_length,region.area] # i change area and major axis
-                    ind_cc+=1
-        
 
         if not in_list: # in the last frame there were no bacteria
             check_prob=[]
-            best_option=[]
             if len(regionprops(new_well)) > 0:
                 # if there is now a new bacteria we don't want to ignore as it may have just
                 # been missed in previous frame
                 if bool(bacteria_lineage):
-                    #smax = max(bacteria_lineage, key=int)
-                    smax = find_max_keys(bacteria_lineage,out_label=out_label)
+                    smax = max(bacteria_lineage, key=int)
                 else: 
                     smax=0
                 newwell = np.zeros(new_well.shape, dtype=uint16)
-                for jj,new_bac in enumerate(regionprops(new_well)):
-                    if jj<max_important_bac:
-                        # so lets give each "new" bacteria a new label
-                        smax += 1
-                        newwell[new_well == new_bac.label] = smax
-                        bacteria_lineage[smax] = str(smax)
+                for new_bac in regionprops(new_well):
+                    # so lets give each "new" bacteria a new label
+                    smax += 1
+                    newwell[new_well == new_bac.label] = smax
+                    bacteria_lineage[smax] = str(smax)
             elif not next(options, None):
                 # if the out well is also empty then there is nothing to track
                 # and simply return an empty well
-                newwell = np.zeros(new_well.shape, dtype=uint16)
+                newwell = np.zeros(new_well.shape, dtype=new_well.dtype)
             bacteria_lineage_new=deepcopy(bacteria_lineage)
 
         # if in_list is not empty    
         else:  # determine probabilities and label matching/new bacteria
-            
-            for j, region2 in enumerate(regionprops(new_well)):
-
-                measurements_out[j] = [region2.centroid[0], region2.major_axis_length,
-                                       region.major_axis_length,region.area]  # i change area and major axis
-            
 
             # create a list of all the possible combinations of the in_list with the current number of bacteria
             options = itertools.combinations_with_replacement(
                 in_list, len(regionprops(new_well)))
             
+            # for each option it gives the change in centroid position, area for each bacteria 
+            
             
             change_options = find_changes(
-                in_list, options, measurements_in, measurements_out)
+                in_list, options, well, new_well)
             
             # from this calculate the most likely option (calculated only on important bacteria)
             best_option = None
@@ -188,13 +157,10 @@ def bacteria_tracking(last_wells, current_wells, bacteria_lineage,
             for cjj, cj in enumerate(check_prob.values()):
                 if cjj< important_bac:
                     important_bac_final+=(cj[0]+1)
-            important_bac_final=min(important_bac_final,max_important_bac)
 #            
 #           now we use the best option to label the bacteria matching the previous frame (only the ones taken in consideration) 
             newwell, bacteria_lineage_new = label_most_likely(
-                best_option, new_well, bacteria_lineage, 
-                important_bac=important_bac_final,out_label=out_label,max_important_bac=max_important_bac)
-    
+                best_option, new_well, bacteria_lineage, important_bac=important_bac_final)
         check_probs[num] = check_prob
         out_wells[num] = newwell
         best_options[num]=best_option
@@ -204,7 +170,7 @@ def bacteria_tracking(last_wells, current_wells, bacteria_lineage,
 
 
 #### Nicola: in this function I had to make arrays of all the list in the sum function
-def find_changes(in_list, option_list, measurements_in, measurements_out):
+def find_changes(in_list, option_list, well, new_well):
     """
     Takes a list
 
@@ -229,7 +195,34 @@ def find_changes(in_list, option_list, measurements_in, measurements_out):
         is a list of the number of divisions, area change, centroid change, input centroid position and input region length
         for that respective bacteria for that potential output combination
     """
+    measurements_in = {}  # need to sort them in the same order as list
+    measurements_out = {}
+    
+    # below shift account for the bacteria growth in the channel that moves bacteria
+    shift_centroid = 0# 10./400 # (50 pixels shift for the end channel )
 
+    # nicola major change 8.5.2020
+    # we sort always the previous data in centroid order
+    pos_centroids_sort=[]
+    
+    for i, region in enumerate(regionprops(well)):
+        pos_centroids_sort.append(region.centroid[0])
+    ind_centroids= argsort(pos_centroids_sort)
+
+    ind_cc =0
+    for jj in ind_centroids:
+        for i, region in enumerate(regionprops(well)):
+            if i==jj:
+
+                measurements_in[ind_cc] = [region.centroid[0]+shift_centroid*region.centroid[0], region.major_axis_length,region.area] # i change area and major axis
+                ind_cc+=1
+                
+    # end nicola major change 8.5.2020
+
+    for j, region2 in enumerate(regionprops(new_well)):
+
+        measurements_out[j] = [region2.centroid[0], region2.major_axis_length,region.major_axis_length,region.area]  # i change area and major axis
+        
     for option in option_list:  # each option is a potential combination of bacteria lineage/death
         in_options_dict = {}
         
@@ -413,7 +406,7 @@ def find_probs(
     return combined_prob, probs
 
 
-def label_all_new(new_well, label_dict_string,important_bac=15, out_label=uint8(254)):
+def label_all_new(new_well, label_dict_string,important_bac=15):
     """
     This is in the emergency situation, label the new bacteria as all new, like we restarted from 0, all these bacteria have no mother
 
@@ -433,10 +426,9 @@ def label_all_new(new_well, label_dict_string,important_bac=15, out_label=uint8(
         each value is a string containing its lineage information
     """
     relabelled_outwell = {}
-    out_well = np.zeros(new_well.shape, dtype=uint16)    
+    out_well = np.zeros(new_well.shape, dtype=new_well.dtype)    
     if bool(label_dict_string):
-#        smax = max(label_dict_string, key=int);
-        smax = find_max_keys(label_dict_string,out_label=out_label)
+        smax = max(label_dict_string, key=int);
     else:
         smax = 0
 
@@ -446,21 +438,11 @@ def label_all_new(new_well, label_dict_string,important_bac=15, out_label=uint8(
             out_well[new_well == region.label] = smax
             label_dict_string[smax] = '%d'%smax
             relabelled_outwell[0]=out_well
-        else:
-            out_well[new_well == region.label] = out_label
-            label_dict_string[out_label] = '%d'%out_label
-            relabelled_outwell[0]=out_well
-            
     return relabelled_outwell, label_dict_string
 
 
 
-def find_max_keys(label_dict_string,out_label=uint8(256)):
-    
-    indices= array(list(label_dict_string.keys()))
-    return (indices[indices!=out_label]).max()
-
-def label_most_likely(most_likely, new_well, label_dict_string,important_bac=20,out_label=uint8(254),max_important_bac =20 ):
+def label_most_likely(most_likely, new_well, label_dict_string,important_bac=None):
     """
     Takes the most likely combination of how the bacteria may have
     divided/died or moved around and re-labels them accordingly
@@ -484,21 +466,20 @@ def label_most_likely(most_likely, new_well, label_dict_string,important_bac=20,
         Updated dictionary where each key is a unique label of a bacteria,
         each value is a string containing its lineage information
     """
-    out_well = np.zeros(new_well.shape, dtype=uint16)
+    out_well = np.zeros(new_well.shape, dtype=new_well.dtype)
     if most_likely is None:
         # if there is no likely option return an empty well
         return out_well, label_dict_string
 
-#    if important_bac is not None:
-#        most_likely=most_likely[:important_bac]
+    if important_bac is not None:
+        most_likely=most_likely[:important_bac]
     
     new_label_string = 0
     smax = 0
-#    smax = max(label_dict_string, key=int);
-    smax = find_max_keys(label_dict_string,out_label=out_label)
-    print(smax)
+    smax = max(label_dict_string, key=int);
+#    print 'smax %0.2f'%smax
     for i, region in enumerate(regionprops(new_well)):
-        if i< important_bac:
+        if i< len(most_likely):
             if most_likely.count(most_likely[i]) == 1:
                 out_well[new_well == region.label] = most_likely[i]
             else:
@@ -515,18 +496,11 @@ def label_most_likely(most_likely, new_well, label_dict_string,important_bac=20,
                 new_label_string += 1
                 add_string = "_%s" % (new_label_string)
                 label_dict_string[smax] = new_label_start + add_string
-
-        # this part assigne a new label to the one that we did not recognized
-        elif (i >= important_bac)* (i< max_important_bac):
-                    smax = find_max_keys(label_dict_string,out_label=out_label)
-                    smax += 1
-                    out_well[new_well == region.label] = smax
-                    label_dict_string[smax] = '%d'%smax          
-            
-        # this part assigne an out_label to the one who we did not care (not important bacteria)
+# this part gives a random number to the one who we did not find a match (not important bacteria)
         else:
-            out_well[new_well == region.label]=out_label # if the most_likely element do not exist
-            label_dict_string[out_label] = '%d'%out_label
+            smax+=1
+            out_well[new_well == region.label]=smax # if the most_likely element do not exist
+            label_dict_string[smax] = '%d'%smax
     return out_well, label_dict_string
 
 
@@ -575,8 +549,6 @@ def find_problems(
                 divisions_count = divisions_count+divisions
             if divisions<0:
                 deaths_count = deaths_count + abs(divisions)
-                if important_bac==1:
-                    flag = False
             if divisions>=0:
                 relative_area_change = 1./check_probs[chan_num][bac_num][1]  
                 centroid_change = check_probs[chan_num][bac_num][2]
@@ -617,3 +589,135 @@ def remove_notimportant_bac(bacteriaim,important_bac=10):
             if j> important_bac-1:  # still need to think about this
                 bacteriaim[bacteriaim==label]= bacteriaim.min()
         return bacteriaim
+
+
+def bacteria_tracking(last_wells, current_wells, bacteria_lineage,
+                    prob_div=0.3,
+                    prob_death=0.01,
+                    prob_no_change=0.7,
+                    av_bac_length=40,#18,
+                    important_bac=None
+                    ):
+    """
+    Takes a dictionary of wells from the previous frame and a second
+    dictionary with the corresponding wells for the new frame and
+    determines the most likely way the bacteria within them have
+    moved, died, divided then relabels them accordingly
+
+    Parameters
+    ------
+    last_wells : Dictionary
+        The previous timepoint. The key is the well coordinates and the value
+        is a labelled image of detected bacteria
+    current_wells : Dictionary
+        The current timepoint. The key is the well coordinates and the value
+        is a labelled image of detected bacteria
+    bacteria_lineage : dictionary
+        A dictionary that links the physical unique label of a bacteria
+        to one which shows information on its lineage
+
+    Returns
+    ------
+    out_wells : Dictionary
+        The current timepoint. The key is the well coordinates and the value
+        is a labelled image of tracked bacteria
+    bacteria_lineage : dictionary
+        Updated dictionary that links the physical unique label of a bacteria
+        to one which shows information on its lineage
+    check_prob : need to check what is it
+    """
+    out_wells = {}
+    check_probs ={}
+    best_options={}
+    if important_bac==None:
+        important_bac= 8
+        
+    # create an in_list of the bacteria in the last well (ordered by position along the channel)
+    for num, well in last_wells.items():
+        if num not in current_wells.keys():
+            continue
+        new_well = (current_wells[num]).astype(uint16)
+        end_channel= shape(new_well)[0]
+        in_list = []
+        centroid_pos =[]
+        #option_list = []
+        for region in regionprops(well):
+            # list the bacteria labels from the current frame
+            in_list.append(region.label)
+            centroid_pos.append(region.centroid[0])
+        ind_sort_y = argsort(centroid_pos)  # nicola: important to sort the list
+#        print unique(well)
+        in_list = array(in_list)
+        in_list= in_list[ind_sort_y]
+        in_list = ndarray.tolist(in_list)
+        
+
+        if not in_list: # in the last frame there were no bacteria
+            check_prob=[]
+            if len(regionprops(new_well)) > 0:
+                # if there is now a new bacteria we don't want to ignore as it may have just
+                # been missed in previous frame
+                if bool(bacteria_lineage):
+                    smax = max(bacteria_lineage, key=int)
+                else: 
+                    smax=0
+                newwell = np.zeros(new_well.shape, dtype=uint16)
+                for new_bac in regionprops(new_well):
+                    # so lets give each "new" bacteria a new label
+                    smax += 1
+                    newwell[new_well == new_bac.label] = smax
+                    bacteria_lineage[smax] = str(smax)
+            elif not next(options, None):
+                # if the out well is also empty then there is nothing to track
+                # and simply return an empty well
+                newwell = np.zeros(new_well.shape, dtype=new_well.dtype)
+            bacteria_lineage_new=deepcopy(bacteria_lineage)
+
+        # if in_list is not empty    
+        else:  # determine probabilities and label matching/new bacteria
+
+            # create a list of all the possible combinations of the in_list with the current number of bacteria
+            options = itertools.combinations_with_replacement(
+                in_list, len(regionprops(new_well)))
+            
+            # for each option it gives the change in centroid position, area for each bacteria 
+            
+            
+            change_options = find_changes(
+                in_list, options, well, new_well)
+            
+            # from this calculate the most likely option (calculated only on important bacteria)
+            best_option = None
+            best_prob = 0
+            check_prob=[]
+            for option, probs in change_options:
+                probs_,probs = find_probs(probs,
+                                    prob_div=prob_div,
+                                    prob_death=prob_death,
+                                    prob_no_change=prob_no_change,
+                                    av_bac_length=av_bac_length,#18,
+                                    end_channel=end_channel,
+                                    important_bac=important_bac
+                                    )
+#                pdb.set_trace()
+                if probs_ > best_prob:
+                    best_prob = probs_
+                    best_option = option
+                    check_prob = probs
+            # Nicola: decomment for printing useful staff
+            
+            #find the new number of relevant bacteria (not consider the one coming from not important bacteria)
+            important_bac_final=0
+            for cjj, cj in enumerate(check_prob.values()):
+                if cjj< important_bac:
+                    important_bac_final+=(cj[0]+1)
+#            
+#           now we use the best option to label the bacteria matching the previous frame (only the ones taken in consideration) 
+            newwell, bacteria_lineage_new = label_most_likely(
+                best_option, new_well, bacteria_lineage, important_bac=important_bac_final)
+        check_probs[num] = check_prob
+        out_wells[num] = newwell
+        best_options[num]=best_option
+        
+        
+    return out_wells, bacteria_lineage_new, check_probs,best_options

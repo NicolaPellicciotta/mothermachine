@@ -7,7 +7,7 @@ from scipy.ndimage import gaussian_filter
    
 ### library from smith 2019
 import skimage.measure as skmeas
-from skimage.morphology import watershed, medial_axis, skeletonize
+from skimage.morphology import medial_axis, skeletonize
 from skimage.filters import sobel
 import skimage.filters as skfilt
 from skimage.measure import regionprops
@@ -32,6 +32,7 @@ import skimage.util as skutil
 from skimage.measure import ransac
 from skimage.transform import AffineTransform
 from skimage.measure import regionprops
+from skimage.segmentation import watershed
 import numpy as np
 import matplotlib.pyplot as plt
 
